@@ -36,19 +36,6 @@ jobs:
     - name: Checkout
       uses: actions/checkout@main
 
-      # === 插入开始：最大化清理磁盘空间 ===
-    - name: Maximize build space
-      uses: jlumbroso/free-disk-space@main
-      with:
-        tool-cache: true
-        android: true
-        dotnet: true
-        haskell: true
-        large-packages: true
-        docker-images: true
-        swap-storage: false
-    # === 插入结束 ===
-
     - name: Initialization environment
       env:
         DEBIAN_FRONTEND: noninteractive
