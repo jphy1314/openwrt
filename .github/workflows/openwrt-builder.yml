@@ -1,0 +1,97 @@
+name: LEDE Builder
+
+on:
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: .config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
+  UPLOAD_FIRMWARE: true
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Initialization environment
+      run: |
+        # ---- 清理磁盘 ----
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /var/lib/apt/lists/*
+        sudo docker system prune -af
+        sudo apt-get clean
+        sudo apt-get autoremove --purge -y
+
+        # ---- 安装精简依赖 ----
+        sudo apt update
+        sudo apt install -y \
+          build-essential gawk git gettext \
+          libncurses5-dev libncursesw5-dev libssl-dev \
+          libtool autopoint bison flex texinfo pkg-config \
+          python3 python3-distutils python3-setuptools \
+          rsync unzip zlib1g-dev
+
+        # ---- 设置时区 ----
+        sudo timedatectl set-timezone "$TZ"
+
+        # ---- 启用 4G swap ----
+        sudo fallocate -l 4G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        free -h
+
+        # ---- 创建工作目录 ----
+        mkdir -p $GITHUB_WORKSPACE/lede
+
+    - name: Clone LEDE source
+      working-directory: $GITHUB_WORKSPACE
+      run: |
+        df -hT /
+        git clone $REPO_URL -b $REPO_BRANCH lede
+
+    - name: Load custom feeds
+      run: |
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF lede/feeds.conf.default
+        chmod +x $DIY_P1_SH
+        cd lede
+        $GITHUB_WORKSPACE/$DIY_P1_SH
+
+    - name: Update & Install feeds
+      run: |
+        cd lede
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Load custom configuration
+      run: |
+        [ -e files ] && mv files lede/files
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE lede/.config
+        chmod +x $DIY_P2_SH
+        cd lede
+        $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: Download packages
+      run: |
+        cd lede
+        make defconfig
+        make download -j2
+
+    - name: Compile firmware
+      run: |
+        cd lede
+        echo "Compiling with 1 thread for stability"
+        make -j1 || make -j1 V=s
+
+    - name: Upload firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: LEDE_firmware
+        path: lede/bin/targets/*/*
